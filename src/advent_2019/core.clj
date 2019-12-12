@@ -1,6 +1,9 @@
 (ns advent-2019.core
   (:require [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.core.async :as async]
+            [clojure.core.logic :as l]
+            [clojure.core.logic.fd :as fd]))
 
 (defn line-comma-input [s]
   (map #(mapv str/trim (str/split % #","))
@@ -19,29 +22,78 @@
 
 ;; Intcode Computer
 
-(defn hlt-op [prog & _]
-  [prog nil])
+(defn mode-read [state base parm mode]
+  (case mode
+    0 (get-in state [:prog parm])
+    1 parm))
 
-(defn tri-op [prog ip [a b out] op]
-  [(assoc prog out (op (prog a) (prog b))) (+ 4 ip)])
+(defn mode-write [state base parm mode val]
+  (case mode
+    0 (assoc-in state [:prog parm] val)))
+
+(defn jmp-true-op [{:keys [ip] :as state} [mode-a mode-b] [a b]]
+  (if (not= 0 (mode-read state nil a mode-a))
+    (assoc state :ip (mode-read state nil b mode-b))
+    (assoc state :ip (+ 3 ip))))
+
+(defn jmp-false-op [{:keys [ip] :as state} [mode-a mode-b] [a b]]
+  (if (= 0 (mode-read state nil a mode-a))
+    (assoc state :ip (mode-read state nil b mode-b))
+    (assoc state :ip (+ 3 ip))))
+
+(defn <-op [a b]
+  ({true 1 false 0} (< a b)))
+
+(defn =-op [a b]
+  ({true 1 false 0} (= a b)))
+
+(defn hlt-op [state & _]
+  (assoc state :running false))
+
+(defn tri-op [{:keys [ip] :as state} [mode-a mode-b mode-c] [a b c] op]
+  (let [A (mode-read state nil a mode-a)
+        B (mode-read state nil b mode-b)
+        val (op A B)
+        state' (mode-write state nil c mode-c val)]
+    (assoc state' :ip (+ 4 ip))))
+
+(defn input [{:keys [ip in] :as state} [_ _ mode-c] [c]]
+  (let [val (async/<!! in)
+        _ (prn :input :val val)
+        state (mode-write state (inc ip) c mode-c val)]
+    (assoc state :ip (+ 2 ip))))
+
+(defn output [{:keys [ip out] :as state} [mode-a _ _] [a]]
+  (let [val (mode-read state (inc ip) a mode-a)]
+    (prn :out val a mode-a)
+    (async/>!! out val))
+  (assoc state :ip (+ 2 ip)))
 
 (def intcode-instr
-  {1  [tri-op +]
-   2  [tri-op *]
-   99 [hlt-op]})
+  {1  [#'tri-op +]
+   2  [#'tri-op *]
+   3  [#'input]
+   4  [#'output]
+   5  [#'jmp-true-op]
+   6  [#'jmp-false-op]
+   7  [#'tri-op #'<-opp]
+   8  [#'tri-op #'=-op]
+   99 [#'hlt-op]})
 
 ;; Make transducer?
-(defn intcode-step [prog ip]
-  (let [[inst & prog-rest] (nthrest prog ip)
+(defn intcode-step [{:keys [prog ip] :as state}]
+  (let [[instmode & prog-rest] (nthrest prog ip)
+        inst (mod instmode 100)
+        modes (map #(mod (quot instmode %) 10) [100 1000 10000])
         [opfn & args] (intcode-instr inst)]
-    ;(prn :ip ip :inst ({1 '+ 2 '* 99 :hlt} inst) :args (take 3 prog-rest))
-    (apply opfn prog ip prog-rest args)))
+    (prn :step instmode inst (take 3 prog-rest) modes args)
+    (apply opfn state modes prog-rest args)))
 
-(defn intcode-run [prog ip]
-  (let [[prog' ip'] (intcode-step prog ip)]
-    (if ip'
-      (recur prog' ip')
-      [prog ip])))
+(defn intcode-run [state]
+  (let [{:keys [running] :as state'}  (intcode-step state)]
+    (if running
+      (recur state')
+      state')))
 
 ;; Problems
 
@@ -59,17 +111,17 @@
 (defn aoc-2a []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-2.txt")))
         prog (-> prog (assoc 1 12) (assoc 2 2))
-        [prog' ip'] (intcode-run prog 0)]
-    (first prog')))
+        state (intcode-run {:running true :prog prog :ip 0})]
+    (get-in state [:prog 0])))
 
-;; 5336
+;; 5335
 (defn aoc-2b []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-2.txt")))]
     (first (for [noun (range 99)
                  verb (range 99)
                  :let [prog (-> prog (assoc 1 noun) (assoc 2 verb))
-                       [prog' ip'] (intcode-run prog 0)]
-                 :when (= 19690720 (prog' 0))]
+                       state (intcode-run {:running true :prog prog :ip 0})]
+                 :when (= 19690720 (get-in state [:prog 0]))]
              (+ verb (* 100 noun))))))
 
 (def wire-dir
@@ -144,5 +196,63 @@
                                (vary-meta loc assoc :dist dist)))]
     (->> intersections (sort-by #(:dist (meta %))) first meta :dist)))
 
+(def aoc-4-input (map #(Long/parseLong %) (str/split "158126-624574" #"-")))
+
+;; 1665
+(defn aoc-4a []
+  (let [[low high] aoc-4-input]
+    (prn :low low :high high)
+    (count
+     (for [a (range 0 (inc 9))
+           b (range a (inc 9))
+           c (range b (inc 9))
+           d (range c (inc 9))
+           e (range d (inc 9))
+           f (range e (inc 9))
+           :when (< (count (set [a b c d e f])) 6)
+           :let [n (Long/parseLong (str a b c d e f))]
+           :when (<= low n high)]
+       n))))
+
+;; 1131
+(defn aoc-4b []
+  (let [[low high] aoc-4-input]
+    (prn :low low :high high)
+    (count
+     (for [a (range 0 (inc 9))
+           b (range a (inc 9))
+           c (range b (inc 9))
+           d (range c (inc 9))
+           e (range d (inc 9))
+           f (range e (inc 9))
+           :when (some #(= 2 %) (map count (partition-by identity [a b c d e f])))
+           :let [n (Long/parseLong (str a b c d e f))]
+           :when (<= low n high)]
+       n))))
+
+;; 13294380
+(defn aoc-5a []
+  (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-5.txt")))
+        in (async/chan 10)
+        out (async/chan 10)
+        state {:running true :in in :out out :prog prog :ip 0}]
+    (async/<!! (async/go
+                 (async/>! in 1)
+                 (intcode-run state)
+                 (async/<! out)))))
+
+(defn aoc-5b []
+  (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-5.txt")))
+        in (async/chan 10)
+        out (async/chan 10)
+        state {:running true :in in :out out :prog prog :ip 0}]
+    (async/<!! (async/go
+                 (async/>! in 5)
+                 (intcode-run state)
+                 (async/<! out)))))
+
 (defn -main [test]
   ((ns-resolve (the-ns 'advent-2019.core) (symbol (str "aoc-" test)))))
+
+(comment
+  (require '[advent-2019.core :reload]))
