@@ -1,9 +1,11 @@
 (ns advent-2019.core
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
-            [clojure.core.async :as async]
+  (:require [clojure.core.async :as async]
             [clojure.core.logic :as l]
-            [clojure.core.logic.fd :as fd]))
+            [clojure.core.logic.fd :as fd]
+            [clojure.java.io :as io]
+            [clojure.math.combinatorics :as comb]
+            [clojure.set :as set]
+            [clojure.string :as str]))
 
 (defn line-comma-input [s]
   (map #(mapv str/trim (str/split % #","))
