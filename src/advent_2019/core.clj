@@ -31,41 +31,33 @@
   (case mode
     0 (assoc-in state [:prog parm] val)))
 
-(defn jmp-true-op [{:keys [ip] :as state} [mode-a mode-b] [a b]]
-  (if (not= 0 (mode-read state nil a mode-a))
+(defn jmp-op [{:keys [ip] :as state} [mode-a mode-b] [a b] cmp]
+  (if (cmp (mode-read state nil a mode-a))
     (assoc state :ip (mode-read state nil b mode-b))
     (assoc state :ip (+ 3 ip))))
 
-(defn jmp-false-op [{:keys [ip] :as state} [mode-a mode-b] [a b]]
-  (if (= 0 (mode-read state nil a mode-a))
-    (assoc state :ip (mode-read state nil b mode-b))
-    (assoc state :ip (+ 3 ip))))
-
-(defn <-op [a b]
-  ({true 1 false 0} (< a b)))
-
-(defn =-op [a b]
-  ({true 1 false 0} (= a b)))
+(defn bool-map [a b op]
+  ({true 1 false 0} (op a b)))
 
 (defn hlt-op [state & _]
+  (async/close! (state :in))
+  (async/close! (state :out))
   (assoc state :running false))
 
-(defn tri-op [{:keys [ip] :as state} [mode-a mode-b mode-c] [a b c] op]
+(defn tri-op [{:keys [ip] :as state} [mode-a mode-b mode-c] [a b c] op & args]
   (let [A (mode-read state nil a mode-a)
         B (mode-read state nil b mode-b)
-        val (op A B)
+        val (apply op A B args)
         state' (mode-write state nil c mode-c val)]
     (assoc state' :ip (+ 4 ip))))
 
 (defn input [{:keys [ip in] :as state} [_ _ mode-c] [c]]
   (let [val (async/<!! in)
-        _ (prn :input :val val)
         state (mode-write state (inc ip) c mode-c val)]
     (assoc state :ip (+ 2 ip))))
 
 (defn output [{:keys [ip out] :as state} [mode-a _ _] [a]]
   (let [val (mode-read state (inc ip) a mode-a)]
-    (prn :out val a mode-a)
     (async/>!! out val))
   (assoc state :ip (+ 2 ip)))
 
@@ -74,10 +66,10 @@
    2  [#'tri-op *]
    3  [#'input]
    4  [#'output]
-   5  [#'jmp-true-op]
-   6  [#'jmp-false-op]
-   7  [#'tri-op #'<-opp]
-   8  [#'tri-op #'=-op]
+   5  [#'jmp-op (complement zero?)]
+   6  [#'jmp-op zero?]
+   7  [#'tri-op #'bool-map <]
+   8  [#'tri-op #'bool-map =]
    99 [#'hlt-op]})
 
 ;; Make transducer?
@@ -86,7 +78,6 @@
         inst (mod instmode 100)
         modes (map #(mod (quot instmode %) 10) [100 1000 10000])
         [opfn & args] (intcode-instr inst)]
-    (prn :step instmode inst (take 3 prog-rest) modes args)
     (apply opfn state modes prog-rest args)))
 
 (defn intcode-run [state]
@@ -233,23 +224,30 @@
 ;; 13294380
 (defn aoc-5a []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-5.txt")))
-        in (async/chan 10)
-        out (async/chan 10)
+        in (async/chan 100)
+        out (async/chan 100)
         state {:running true :in in :out out :prog prog :ip 0}]
-    (async/<!! (async/go
-                 (async/>! in 1)
-                 (intcode-run state)
-                 (async/<! out)))))
+    (async/go-loop []
+      (if-let [output (async/<! out)]
+        (do (prn :output output)
+            (recur))))
+    (async/>!! in 1)
+    (intcode-run state)
+    true))
 
+;; 11460760
 (defn aoc-5b []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-5.txt")))
-        in (async/chan 10)
-        out (async/chan 10)
+        in (async/chan 100)
+        out (async/chan 100)
         state {:running true :in in :out out :prog prog :ip 0}]
-    (async/<!! (async/go
-                 (async/>! in 5)
-                 (intcode-run state)
-                 (async/<! out)))))
+    (async/go-loop []
+      (if-let [output (async/<! out)]
+        (do (prn :output output)
+            (recur))))
+    (async/>!! in 5)
+    (intcode-run state)
+    true))
 
 (defn -main [test]
   ((ns-resolve (the-ns 'advent-2019.core) (symbol (str "aoc-" test)))))
