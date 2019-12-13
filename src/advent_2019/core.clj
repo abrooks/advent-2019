@@ -268,6 +268,27 @@
                       (last amp-io))))]
     (async/<!! (async/reduce max 0 outputs))))
 
+;; 21596786
+(defn aoc-7b []
+  (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-7.txt")))
+        state {:running true :prog prog :ip 0}
+        amp-phases (range 5 (inc 9))
+        outputs (async/merge
+                  (for [[a b c d e] (comb/permutations amp-phases)
+                        :let [amp-io (take (inc (count amp-phases))
+                                           (repeatedly #(async/chan 100)))]]
+                    (do
+                      (doall (map #(async/>!! %1 %2) amp-io [a b c d e]))
+                      (async/>!! (first amp-io) 0)
+                      (let [[head tail] ((juxt first last) amp-io)
+                            amp-mult (async/mult tail)
+                            [amp-loop amp-out] (map #(async/tap amp-mult %) (repeatedly #(async/chan 100)))]
+                        (async/pipe amp-loop head)
+                        (doseq [[in out] (partition 2 1 amp-io)]
+                          (async/thread (intcode-run (assoc state :in in :out out))))
+                        (async/reduce (fn [a b] b) nil amp-out)))))]
+    (async/<!! (async/reduce max 0 outputs))))
+
 (defn -main [test]
   ((ns-resolve (the-ns 'advent-2019.core) (symbol (str "aoc-" test)))))
 
