@@ -251,6 +251,22 @@
     (intcode-run state)
     true))
 
+;; 366376
+(defn aoc-7a []
+  (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-7.txt")))
+        state {:running true :prog prog :ip 0}
+        amp-count 5
+        outputs (async/merge
+                  (for [[a b c d e] (comb/permutations (range amp-count))
+                        :let [amp-io (take (inc amp-count) (repeatedly #(async/chan 100)))]]
+                    (do
+                      (doall (map #(async/>!! %1 %2) amp-io [a b c d e]))
+                      (async/>!! (first amp-io) 0)
+                      (doseq [[in out] (partition 2 1 amp-io)]
+                        (async/thread (intcode-run (assoc state :in in :out out))))
+                      (last amp-io))))]
+    (async/<!! (async/transduce identity max 0 outputs))))
+
 (defn -main [test]
   ((ns-resolve (the-ns 'advent-2019.core) (symbol (str "aoc-" test)))))
 
