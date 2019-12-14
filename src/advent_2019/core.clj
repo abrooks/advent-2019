@@ -24,6 +24,12 @@
 
 ;; Intcode Computer
 
+(defonce trace (atom false))
+
+(defn debug [& args]
+  (when @trace
+    (print (str (apply pr-str args) \newline))))
+
 (defn mode-read [state base parm mode]
   (case mode
     0 (get-in state [:prog parm])
@@ -80,6 +86,8 @@
         inst (mod instmode 100)
         modes (map #(mod (quot instmode %) 10) [100 1000 10000])
         [opfn & args] (intcode-instr inst)]
+    (debug :step :ip ip :base base :inst inst :63 (prog 63)
+           :call opfn modes (take 3 prog-rest) args)
     (apply opfn state modes prog-rest args)))
 
 (defn intcode-run [state]
