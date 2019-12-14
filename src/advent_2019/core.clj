@@ -273,6 +273,35 @@
     (intcode-run state)
     true))
 
+(defn treewalk [loc path cluster]
+  (let [todo (get cluster loc)
+        cluster' (dissoc cluster loc)
+        path' (conj path loc)]
+    (conj (when todo (mapcat #(treewalk % path' cluster') todo))
+          {loc path})))
+
+;; 135690
+(defn aoc-6a []
+  (let [orbit-links (map #(str/split (first %) #"\)") (inputs "aoc-6.txt"))
+        groups (group-by first orbit-links)
+        cluster (zipmap (keys groups)
+                        (map #(into #{} (map second %)) (vals groups)))
+        trees (apply merge (treewalk "COM" [] cluster))]
+    (count (apply concat (vals trees)))))
+
+;; 298
+(defn aoc-6b []
+  (let [orbit-links (map #(str/split (first %) #"\)") (inputs "aoc-6.txt"))
+        groups (group-by first orbit-links)
+        cluster (zipmap (keys groups)
+                        (map #(into #{} (map second %)) (vals groups)))
+        trees (apply merge (treewalk "COM" [] cluster))
+        you (set (trees "YOU"))
+        santa (set (trees "SAN"))
+        only-you (set/difference you santa)
+        only-santa (set/difference santa you)]
+    (+ (count only-you) (count only-santa))))
+
 ;; 366376
 (defn aoc-7a []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-7.txt")))
