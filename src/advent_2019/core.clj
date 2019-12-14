@@ -75,7 +75,7 @@
    99 [#'hlt-op]})
 
 ;; Make transducer?
-(defn intcode-step [{:keys [prog ip] :as state}]
+(defn intcode-step [{:keys [prog ip base] :as state}]
   (let [[instmode & prog-rest] (nthrest prog ip)
         inst (mod instmode 100)
         modes (map #(mod (quot instmode %) 10) [100 1000 10000])
@@ -87,6 +87,8 @@
     (if running
       (recur state')
       state')))
+
+(def intcode-init {:prog [99] :running true :ip 0 :base 0})
 
 ;; Problems
 
@@ -104,7 +106,7 @@
 (defn aoc-2a []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-2.txt")))
         prog (-> prog (assoc 1 12) (assoc 2 2))
-        state (intcode-run {:running true :prog prog :ip 0})]
+        state (intcode-run (assoc intcode-init :prog prog))]
     (get-in state [:prog 0])))
 
 ;; 5335
@@ -113,7 +115,7 @@
     (first (for [noun (range 99)
                  verb (range 99)
                  :let [prog (-> prog (assoc 1 noun) (assoc 2 verb))
-                       state (intcode-run {:running true :prog prog :ip 0})]
+                       state (intcode-run (assoc intcode-init :prog prog))]
                  :when (= 19690720 (get-in state [:prog 0]))]
              (+ verb (* 100 noun))))))
 
@@ -228,7 +230,7 @@
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-5.txt")))
         in (async/chan 100)
         out (async/chan 100)
-        state {:running true :in in :out out :prog prog :ip 0}]
+        state (assoc intcode-init :prog prog :in in :out out)]
     (async/go-loop []
       (if-let [output (async/<! out)]
         (do (prn :output output)
@@ -242,7 +244,7 @@
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-5.txt")))
         in (async/chan 100)
         out (async/chan 100)
-        state {:running true :in in :out out :prog prog :ip 0}]
+        state (assoc intcode-init :prog prog :in in :out out)]
     (async/go-loop []
       (if-let [output (async/<! out)]
         (do (prn :output output)
@@ -254,7 +256,7 @@
 ;; 366376
 (defn aoc-7a []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-7.txt")))
-        state {:running true :prog prog :ip 0}
+        state (assoc intcode-init :prog prog)
         amp-phases (range 0 5)
         outputs (async/merge
                   (for [[a b c d e] (comb/permutations amp-phases)
@@ -271,7 +273,7 @@
 ;; 21596786
 (defn aoc-7b []
   (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-7.txt")))
-        state {:running true :prog prog :ip 0}
+        state (assoc intcode-init :prog prog)
         amp-phases (range 5 (inc 9))
         outputs (async/merge
                   (for [[a b c d e] (comb/permutations amp-phases)
