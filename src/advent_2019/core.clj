@@ -30,18 +30,27 @@
   (when @trace
     (print (str (apply pr-str args) \newline))))
 
-(defn mode-read [state base parm mode]
-  (case mode
-    0 (get-in state [:prog parm])
-    1 parm))
 
-(defn mode-write [state base parm mode val]
+(defn size-mem [{:keys [prog] :as state} addr]
+  (if (and addr (< (count prog) addr))
+    (assoc state :prog (vec (take (inc addr) (concat prog (repeat 0)))))
+    state))
+
+(defn mode-read [{:keys [prog base] :as state} parm mode]
   (case mode
-    0 (assoc-in state [:prog parm] val)))
+    0 (get-in (size-mem state parm) [:prog parm])
+    1 parm
+    2 (let [addr (+ base parm)]
+       (get-in (size-mem state addr) [:prog addr]))))
+
+(defn mode-write [{:keys [base prog] :as state} parm mode val]
+  (let [addr (case mode 0 parm 2 (+ base parm))
+        state' (size-mem state addr)]
+    (assoc-in state' [:prog addr] val)))
 
 (defn jmp-op [{:keys [ip] :as state} [mode-a mode-b] [a b] cmp]
-  (if (cmp (mode-read state nil a mode-a))
-    (assoc state :ip (mode-read state nil b mode-b))
+  (if (cmp (mode-read state a mode-a))
+    (assoc state :ip (mode-read state b mode-b))
     (assoc state :ip (+ 3 ip))))
 
 (defn bool-map [a b op]
@@ -53,21 +62,25 @@
   (assoc state :running false))
 
 (defn tri-op [{:keys [ip] :as state} [mode-a mode-b mode-c] [a b c] op & args]
-  (let [A (mode-read state nil a mode-a)
-        B (mode-read state nil b mode-b)
+  (let [A (mode-read state a mode-a)
+        B (mode-read state b mode-b)
         val (apply op A B args)
-        state' (mode-write state nil c mode-c val)]
+        state' (mode-write state c mode-c val)]
     (assoc state' :ip (+ 4 ip))))
 
-(defn input [{:keys [ip in] :as state} [_ _ mode-c] [c]]
+(defn input [{:keys [ip in] :as state} [mode-a _ _] [a _ _]]
   (let [val (async/<!! in)
-        state (mode-write state (inc ip) c mode-c val)]
-    (assoc state :ip (+ 2 ip))))
+        state' (mode-write state a mode-a val)]
+    (assoc state' :ip (+ 2 ip))))
 
 (defn output [{:keys [ip out] :as state} [mode-a _ _] [a]]
-  (let [val (mode-read state (inc ip) a mode-a)]
+  (let [val (mode-read state a mode-a)]
     (async/>!! out val))
   (assoc state :ip (+ 2 ip)))
+
+(defn adj-base-op [{:keys [base ip] :as state} [mode-a _ _] [a _ _]]
+  (assoc state :base (+ base (mode-read state a mode-a))
+               :ip (+ 2 ip)))
 
 (def intcode-instr
   {1  [#'tri-op +]
@@ -78,6 +91,7 @@
    6  [#'jmp-op zero?]
    7  [#'tri-op #'bool-map <]
    8  [#'tri-op #'bool-map =]
+   9  [#'adj-base-op]
    99 [#'hlt-op]})
 
 ;; Make transducer?
@@ -298,6 +312,34 @@
                           (async/thread (intcode-run (assoc state :in in :out out))))
                         (async/reduce (fn [a b] b) nil amp-out)))))]
     (async/<!! (async/reduce max 0 outputs))))
+
+;; 2427443564
+(defn aoc-9a []
+  (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-9.txt")))
+        in (async/chan 100)
+        out (async/chan 100)
+        state (assoc intcode-init :prog prog :in in :out out)]
+    (async/go-loop []
+      (if-let [output (async/<! out)]
+        (do (print (str (pr-str :output output) \newline))
+            (recur))))
+    (async/>!! in 1)
+    (intcode-run state)
+    true))
+
+;; 87221 (16947 msec)
+(defn aoc-9b []
+  (let [prog (mapv #(Long/parseLong %) (first (inputs "aoc-9.txt")))
+        in (async/chan 100)
+        out (async/chan 100)
+        state (assoc intcode-init :prog prog :in in :out out)]
+    (async/go-loop []
+      (if-let [output (async/<! out)]
+        (do (print (str (pr-str :output output) \newline))
+            (recur))))
+    (async/>!! in 2)
+    (intcode-run state)
+    true))
 
 (defn -main [test]
   ((ns-resolve (the-ns 'advent-2019.core) (symbol (str "aoc-" test)))))
